@@ -38,18 +38,6 @@
 
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
 
-  /* Bloquear landscape en móvil */
-  @media screen and (orientation: landscape) and (max-height: 500px) {
-    body::before {
-      content: 'Rotá el dispositivo a modo vertical';
-      position: fixed; inset: 0; z-index: 9999;
-      background: var(--bg); color: var(--accent);
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--mono); font-size: 1rem; text-align: center; padding: 24px;
-    }
-    body > * { display: none !important; }
-  }
-
   /* HEADER */
   header { padding: 18px 28px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--border); }
   header h1 { font-family: var(--mono); font-size: 1.15rem; font-weight: 700; color: var(--accent); letter-spacing: .04em; }
@@ -155,13 +143,46 @@
   .adic-toggle input[type=checkbox] { margin-top: 3px; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
   .adic-toggle .adic-body { flex: 1; }
   .adic-toggle.disabled .adic-body { opacity: .35; pointer-events: none; }
+
+  /* LOCK SCREEN */
+  #lock-screen {
+    position: fixed; inset: 0; z-index: 10000;
+    background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 22px; padding: 24px;
+  }
+  #lock-screen h1 { font-family: var(--mono); color: var(--accent); font-size: 1.1rem; letter-spacing: .04em; }
+  .pin-dots { display: flex; gap: 14px; }
+  .pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border); transition: background .15s, border-color .15s; }
+  .pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+  .pin-dot.shake { animation: shakeDot .35s; }
+  @keyframes shakeDot { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 64px); gap: 14px; }
+  .pin-key { width: 64px; height: 64px; border-radius: 50%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 1.3rem; font-weight: 600; cursor: pointer; transition: background .15s; }
+  .pin-key:active { background: var(--accent-bg); border-color: var(--accent); }
+  .pin-key.empty { visibility: hidden; }
+  #lock-error { font-size: .78rem; color: var(--red); height: 16px; }
+  #lock-sub { font-size: .75rem; color: var(--muted); }
+  #lock-screen.hidden { display: none; }
 </style>
 </head>
 <body>
 
+<div id="lock-screen">
+  <h1>🔒 SUELDO AR</h1>
+  <div id="lock-sub">Ingresá tu PIN</div>
+  <div class="pin-dots" id="pin-dots">
+    <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+  </div>
+  <div id="lock-error"></div>
+  <div class="pin-pad" id="pin-pad"></div>
+  <button class="btn btn-secondary btn-sm" id="lock-reset-btn" style="display:none" onclick="resetPin()">Olvidé mi PIN — reiniciar app</button>
+</div>
+
 <header>
   <h1>SUELDO AR</h1>
   <span>gestor de liquidación y turnos</span>
+  <button id="btn-lock-config" onclick="abrirConfigPin()" style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:.7rem;padding:6px 10px;cursor:pointer;">🔒 PIN</button>
 </header>
 
 <nav>
@@ -1382,11 +1403,6 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// Bloquear orientación portrait si la API está disponible
-if (screen.orientation && screen.orientation.lock) {
-  screen.orientation.lock('portrait').catch(() => {});
-}
-
 // Generar ícono PWA con canvas (evita necesitar archivos de imagen externos)
 (function generateIcon() {
   const size = 192;
@@ -1420,6 +1436,135 @@ if (screen.orientation && screen.orientation.lock) {
   // Guardar en sessionStorage para que el SW lo use si es necesario
   try { sessionStorage.setItem('pwa-icon', dataUrl); } catch {}
 })();
+
+// ═══════════════════════════════════ PIN LOCK
+let pinBuffer = '';
+let pinMode = 'unlock'; // 'unlock' | 'setup' | 'setup-confirm' | 'change-verify'
+let pinTemp = '';
+
+function getPin() { return LS.get('sar_pin'); }
+function setPin(p) { LS.set('sar_pin', p); }
+
+function buildPinPad() {
+  const pad = document.getElementById('pin-pad');
+  const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  pad.innerHTML = keys.map(k => {
+    if(k === '') return `<button class="pin-key empty"></button>`;
+    return `<button class="pin-key" onclick="pinPress('${k}')">${k}</button>`;
+  }).join('');
+}
+
+function updatePinDots() {
+  const dots = document.querySelectorAll('.pin-dot');
+  dots.forEach((d,i) => d.classList.toggle('filled', i < pinBuffer.length));
+}
+
+function pinPress(k) {
+  if(k === '⌫') { pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
+  if(pinBuffer.length >= 4) return;
+  pinBuffer += k;
+  updatePinDots();
+  if(pinBuffer.length === 4) setTimeout(procesarPin, 150);
+}
+
+function shakeAndClear(msg) {
+  document.getElementById('lock-error').textContent = msg;
+  document.querySelectorAll('.pin-dot').forEach(d => d.classList.add('shake'));
+  setTimeout(() => {
+    document.querySelectorAll('.pin-dot').forEach(d => d.classList.remove('shake','filled'));
+    pinBuffer = '';
+  }, 350);
+}
+
+function procesarPin() {
+  const stored = getPin();
+
+  if(pinMode === 'unlock') {
+    if(pinBuffer === stored) {
+      document.getElementById('lock-screen').classList.add('hidden');
+      pinBuffer = '';
+    } else {
+      shakeAndClear('PIN incorrecto');
+    }
+    return;
+  }
+
+  if(pinMode === 'setup') {
+    pinTemp = pinBuffer;
+    pinBuffer = '';
+    updatePinDots();
+    pinMode = 'setup-confirm';
+    document.getElementById('lock-sub').textContent = 'Repetí el PIN para confirmar';
+    document.getElementById('lock-error').textContent = '';
+    return;
+  }
+
+  if(pinMode === 'setup-confirm') {
+    if(pinBuffer === pinTemp) {
+      setPin(pinBuffer);
+      pinBuffer = ''; pinTemp = '';
+      document.getElementById('lock-screen').classList.add('hidden');
+      alert('✓ PIN configurado correctamente.');
+    } else {
+      pinBuffer = ''; pinTemp = '';
+      updatePinDots();
+      pinMode = 'setup';
+      document.getElementById('lock-sub').textContent = 'No coincide. Creá un PIN de 4 dígitos';
+      document.getElementById('lock-error').textContent = '';
+    }
+    return;
+  }
+
+  if(pinMode === 'change-verify') {
+    if(pinBuffer === stored) {
+      pinBuffer = '';
+      updatePinDots();
+      pinMode = 'setup';
+      document.getElementById('lock-sub').textContent = 'Creá tu nuevo PIN de 4 dígitos';
+      document.getElementById('lock-error').textContent = '';
+    } else {
+      shakeAndClear('PIN incorrecto');
+    }
+    return;
+  }
+}
+
+function mostrarLockScreen() {
+  document.getElementById('lock-screen').classList.remove('hidden');
+  document.getElementById('lock-reset-btn').style.display = 'none';
+  pinBuffer = '';
+  updatePinDots();
+}
+
+function abrirConfigPin() {
+  const stored = getPin();
+  pinMode = stored ? 'change-verify' : 'setup';
+  document.getElementById('lock-sub').textContent = stored ? 'Ingresá tu PIN actual' : 'Creá un PIN de 4 dígitos';
+  document.getElementById('lock-error').textContent = '';
+  mostrarLockScreen();
+  if(stored) document.getElementById('lock-reset-btn').style.display = 'inline-block';
+}
+
+function resetPin() {
+  if(!confirm('Esto borra el PIN (no borra tus datos de sueldo). ¿Continuar?')) return;
+  localStorage.removeItem('sar_pin');
+  pinBuffer = '';
+  document.getElementById('lock-screen').classList.add('hidden');
+  alert('PIN eliminado. La app quedó sin bloqueo.');
+}
+
+// Inicialización del lock al cargar
+document.addEventListener('DOMContentLoaded', () => {
+  buildPinPad();
+  const stored = getPin();
+  if(stored) {
+    pinMode = 'unlock';
+    document.getElementById('lock-sub').textContent = 'Ingresá tu PIN';
+    mostrarLockScreen();
+  } else {
+    document.getElementById('lock-screen').classList.add('hidden');
+  }
+});
 </script>
 </body>
 </html>
