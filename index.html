@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">>
 <title>Sueldo AR</title>
 
 <!-- PWA -->
@@ -37,6 +37,18 @@
   }
 
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  /* Bloquear landscape en móvil */
+  @media screen and (orientation: landscape) and (max-height: 500px) {
+    body::before {
+      content: 'Rotá el dispositivo a modo vertical';
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--bg); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 1rem; text-align: center; padding: 24px;
+    }
+    body > * { display: none !important; }
+  }
 
   /* HEADER */
   header { padding: 18px 28px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--border); }
@@ -481,8 +493,8 @@
 <div id="tab-historial" class="tab">
 
   <div class="card">
-    <div class="card-title">Agregar / editar registro mensual</div>
-    <div class="grid3">
+    <div class="card-title">Agregar / editar sueldo mensual</div>
+    <div class="grid2">
       <div class="form-group">
         <label>Mes / Año</label>
         <input type="month" id="hi-period">
@@ -491,18 +503,31 @@
         <label>Sueldo neto $</label>
         <input type="number" id="hi-neto" placeholder="0" min="0">
       </div>
-      <div class="form-group">
-        <label>Inflación del mes %</label>
-        <input type="number" id="hi-inf" placeholder="0.0" step="0.1" min="0">
-        <div class="info">IPC INDEC mensual</div>
-      </div>
     </div>
     <div class="form-group">
       <label>Notas (opcional)</label>
       <input type="text" id="hi-notas" placeholder="Ej: aumento paritaria, aguinaldo...">
     </div>
     <div class="row-actions">
-      <button class="btn btn-primary" onclick="guardarHistorial()">Guardar registro</button>
+      <button class="btn btn-primary" onclick="guardarHistorial()">Guardar sueldo</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Inflación mensual <span class="tag tag-yellow" style="margin-left:4px">IPC INDEC</span></div>
+    <div class="grid2">
+      <div class="form-group">
+        <label>Mes / Año</label>
+        <input type="month" id="hi-inf-period">
+      </div>
+      <div class="form-group">
+        <label>Inflación del mes %</label>
+        <input type="number" id="hi-inf" placeholder="0.0" step="0.1" min="0">
+        <div class="info">Podés cargarlo después sin tocar el sueldo</div>
+      </div>
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-primary" onclick="guardarInflacion()">Guardar inflación</button>
     </div>
   </div>
 
@@ -992,15 +1017,38 @@ let histChart = null;
 function guardarHistorial() {
   const period = document.getElementById('hi-period').value;
   const neto   = +document.getElementById('hi-neto').value || 0;
-  const inf    = +document.getElementById('hi-inf').value || 0;
   const notas  = document.getElementById('hi-notas').value;
 
   if(!period || neto<=0) { alert('Completá período y sueldo neto.'); return; }
 
   const hist = LS.get('sar_hist') || [];
   const idx  = hist.findIndex(h => h.period === period);
-  if(idx>=0) hist[idx] = { period, neto, inf, notas };
-  else { hist.push({ period, neto, inf, notas }); hist.sort((a,b)=>a.period.localeCompare(b.period)); }
+  if(idx>=0) {
+    // Preservar inflación existente
+    hist[idx] = { ...hist[idx], period, neto, notas };
+  } else {
+    hist.push({ period, neto, inf: 0, notas });
+    hist.sort((a,b)=>a.period.localeCompare(b.period));
+  }
+  LS.set('sar_hist', hist);
+  renderHistorial();
+}
+
+function guardarInflacion() {
+  const period = document.getElementById('hi-inf-period').value;
+  const inf    = +document.getElementById('hi-inf').value || 0;
+
+  if(!period) { alert('Seleccioná el mes.'); return; }
+
+  const hist = LS.get('sar_hist') || [];
+  const idx  = hist.findIndex(h => h.period === period);
+  if(idx>=0) {
+    hist[idx].inf = inf;
+  } else {
+    // Crear registro solo con inflación si no existe
+    hist.push({ period, neto: 0, inf, notas: '' });
+    hist.sort((a,b)=>a.period.localeCompare(b.period));
+  }
   LS.set('sar_hist', hist);
   renderHistorial();
 }
@@ -1187,10 +1235,12 @@ function toggleRecibo(pid) {
 function editarHistorial(period) {
   const r = (LS.get('sar_hist')||[]).find(h=>h.period===period);
   if(!r) return;
-  document.getElementById('hi-period').value = r.period;
-  document.getElementById('hi-neto').value   = r.neto;
-  document.getElementById('hi-inf').value    = r.inf||'';
-  document.getElementById('hi-notas').value  = r.notas||'';
+  document.getElementById('hi-period').value     = r.period;
+  document.getElementById('hi-neto').value       = r.neto;
+  document.getElementById('hi-notas').value      = r.notas||'';
+  // Poblar también el panel de inflación
+  document.getElementById('hi-inf-period').value = r.period;
+  document.getElementById('hi-inf').value        = r.inf||'';
   window.scrollTo({top:0, behavior:'smooth'});
 }
 
@@ -1330,6 +1380,11 @@ function importarDatos(event) {
 // ═══════════════════════════════════ PWA — SERVICE WORKER
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// Bloquear orientación portrait si la API está disponible
+if (screen.orientation && screen.orientation.lock) {
+  screen.orientation.lock('portrait').catch(() => {});
 }
 
 // Generar ícono PWA con canvas (evita necesitar archivos de imagen externos)
