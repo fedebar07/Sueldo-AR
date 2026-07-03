@@ -500,6 +500,7 @@
       <span><span class="turn-badge turn-T">T</span> Tarde 14–22</span>
       <span><span class="turn-badge turn-M">M</span> Mañana 06–14</span>
       <span><span class="turn-badge turn-F">F</span> Franco</span>
+      <span><span style="color:var(--yellow)">★</span> Feriado nacional</span>
     </div>
   </div>
 
@@ -564,7 +565,7 @@
 
   <div class="card">
     <div class="card-title">Registros mensuales</div>
-    <div id="hist-list"></div>
+    <div id="hist-list" style="max-height:420px;overflow-y:auto;"></div>
   </div>
 
   <div class="card">
@@ -981,6 +982,57 @@ function cambiarMes(delta) {
   renderMonthGrid();
 }
 
+// ── Feriados argentinos ──────────────────────────────────────────
+function pascua(y) {
+  // Algoritmo de Meeus/Jones/Butcher
+  const a=y%19,b=Math.floor(y/100),c=y%100;
+  const d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25);
+  const g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30;
+  const i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7;
+  const m=Math.floor((a+11*h+22*l)/451);
+  const mes=Math.floor((h+l-7*m+114)/31)-1; // 0-based
+  const dia=((h+l-7*m+114)%31)+1;
+  return new Date(y, mes, dia);
+}
+
+function getFeriados(y) {
+  const p = pascua(y);
+  const add = (d, days) => { const r=new Date(d); r.setDate(r.getDate()+days); return r; };
+  const f = (m, d) => new Date(y, m-1, d);
+
+  const lista = [
+    // Fijos inamovibles
+    { fecha: f(1,1),   nombre: 'Año Nuevo' },
+    { fecha: f(3,24),  nombre: 'Día de la Memoria' },
+    { fecha: f(4,2),   nombre: 'Malvinas' },
+    { fecha: f(5,1),   nombre: 'Día del Trabajador' },
+    { fecha: f(5,25),  nombre: '25 de Mayo' },
+    { fecha: f(6,20),  nombre: 'Paso a la Inmortalidad de Güemes' },
+    { fecha: f(7,9),   nombre: 'Independencia' },
+    { fecha: f(12,8),  nombre: 'Inmaculada Concepción' },
+    { fecha: f(12,25), nombre: 'Navidad' },
+    // Trasladables (aproximación — se usan fechas más comunes)
+    { fecha: f(8,17),  nombre: 'Paso a la Inmortalidad de San Martín' },
+    { fecha: f(10,12), nombre: 'Día del Respeto a la Diversidad Cultural' },
+    { fecha: f(11,20), nombre: 'Día de la Soberanía Nacional' },
+    // Móviles
+    { fecha: add(p, -48), nombre: 'Carnaval' },
+    { fecha: add(p, -47), nombre: 'Carnaval' },
+    { fecha: add(p, -3),  nombre: 'Jueves Santo' },
+    { fecha: add(p, -2),  nombre: 'Viernes Santo' },
+    { fecha: p,            nombre: 'Pascua' },
+  ];
+
+  // Convertir a set de claves "m-d" para lookup rápido
+  const map = {};
+  lista.forEach(item => {
+    const key = `${item.fecha.getMonth()}-${item.fecha.getDate()}`;
+    map[key] = item.nombre;
+  });
+  return map;
+}
+// ────────────────────────────────────────────────────────────────
+
 function renderMonthGrid(cfg) {
   cfg = cfg || getHorConfig();
   const now = new Date();
@@ -989,6 +1041,7 @@ function renderMonthGrid(cfg) {
   const firstDow = new Date(y, m, 1).getDay();
   const daysInMonth = new Date(y, m+1, 0).getDate();
   const today = new Date(); today.setHours(0,0,0,0);
+  const feriados = getFeriados(y);
 
   document.getElementById('h-mes-label').textContent = `${MESES[m]} ${y}`;
 
@@ -1003,31 +1056,40 @@ function renderMonthGrid(cfg) {
   for(let i = 0; i < firstDow; i++) grid.innerHTML += '<div></div>';
 
   // Contadores para resumen
-  const cnt = { N:0, T:0, M:0, F:0 };
+  const cnt = { N:0, T:0, M:0, F:0, FER:0 };
 
   for(let d = 1; d <= daysInMonth; d++){
     const fecha = new Date(y, m, d);
     const t = turnoEnFecha(fecha, cfg);
     const info = TURNO_INFO[t];
     const isToday = fecha.toDateString() === today.toDateString();
+    const ferKey = `${m}-${d}`;
+    const esFeriado = !!feriados[ferKey];
+    const ferNombre = feriados[ferKey] || '';
     cnt[t]++;
+    if(esFeriado) cnt.FER++;
+
     grid.innerHTML += `
-      <div class="day-cell${isToday?' today':''}${t==='F'?' franco':''}" style="padding:5px 3px;">
-        <div style="font-size:.68rem;color:${isToday?'var(--accent)':'var(--muted)'};margin-bottom:3px;font-weight:${isToday?700:400}">${d}</div>
+      <div class="day-cell${isToday?' today':''}${t==='F'?' franco':''}"
+           style="padding:5px 3px;${esFeriado?'border-color:var(--yellow);':''}"
+           title="${ferNombre}">
+        <div style="font-size:.68rem;color:${isToday?'var(--accent)':'var(--muted)'};margin-bottom:3px;font-weight:${isToday?700:400}">${d}${esFeriado?'<span style="color:var(--yellow)">★</span>':''}</div>
         <span class="turn-badge ${info.cls}" style="font-size:.62rem;padding:1px 5px">${t}</span>
       </div>`;
   }
 
   // Resumen
   const res = document.getElementById('h-resumen');
-  res.innerHTML = ['N','T','M','F'].map(t => {
-    const info = TURNO_INFO[t];
-    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 8px;">
+  const items = [
+    ...['N','T','M','F'].map(t => ({ key:t, info: TURNO_INFO[t], cnt: cnt[t] })),
+    { key:'FER', info:{ label:'Feriado', colorVar:'var(--yellow)' }, cnt: cnt.FER },
+  ];
+  res.innerHTML = items.map(({ info, cnt:c }) => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 8px;">
       <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px">${info.label}</div>
-      <div style="font-family:var(--mono);font-size:1.5rem;font-weight:700;color:${info.colorVar}">${cnt[t]}</div>
+      <div style="font-family:var(--mono);font-size:1.5rem;font-weight:700;color:${info.colorVar}">${c}</div>
       <div style="font-size:.68rem;color:var(--muted)">días</div>
-    </div>`;
-  }).join('');
+    </div>`).join('');
 }
 
 document.getElementById('h-mes')?.addEventListener('change', () => renderMonthGrid());
