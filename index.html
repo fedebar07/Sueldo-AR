@@ -507,7 +507,44 @@
   <!-- Resumen del mes -->
   <div class="card">
     <div class="card-title">Resumen del mes visible</div>
-    <div id="h-resumen" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;"></div>
+    <div id="h-resumen" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center;"></div>
+  </div>
+
+  <!-- Registro de novedades -->
+  <div class="card">
+    <div class="card-title">Registro de novedades</div>
+    <div class="grid3">
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="date" id="nov-fecha">
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="nov-tipo">
+          <option value="extra">Horas extras</option>
+          <option value="franco">Franco trabajado</option>
+          <option value="feriado">Feriado trabajado</option>
+          <option value="vacaciones">Vacaciones</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Horas <span style="font-size:.7rem;color:var(--muted)">(vacaciones = días)</span></label>
+        <input type="number" id="nov-horas" placeholder="0" min="0.5" step="0.5">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Nota (opcional)</label>
+      <input type="text" id="nov-nota" placeholder="Ej: cubrí a un compañero...">
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-primary" onclick="guardarNovedad()">Agregar</button>
+    </div>
+  </div>
+
+  <!-- Lista de novedades por mes -->
+  <div class="card">
+    <div class="card-title">Novedades registradas</div>
+    <div id="nov-list"><div class="empty">No hay novedades registradas aún.</div></div>
   </div>
 </div>
 
@@ -596,7 +633,7 @@ function showTab(id) {
   document.getElementById('tab-'+id).classList.add('active');
   event.currentTarget.classList.add('active');
   if (id === 'historial') renderHistorial();
-  if (id === 'horarios') renderHorarios();
+  if (id === 'horarios') { renderHorarios(); renderNovedades(); }
 }
 
 // ═══════════════════════════════════ UTILS
@@ -1094,7 +1131,94 @@ function renderMonthGrid(cfg) {
 
 document.getElementById('h-mes')?.addEventListener('change', () => renderMonthGrid());
 
-// ═══════════════════════════════════ HISTORIAL
+// ═══════════════════════════════════ NOVEDADES
+const NOV_TIPOS = {
+  extra:      { label: 'Horas extras',       color: 'var(--accent)',  icon: '⏱' },
+  franco:     { label: 'Franco trabajado',    color: 'var(--yellow)',  icon: '📅' },
+  feriado:    { label: 'Feriado trabajado',   color: '#f59e42',        icon: '★' },
+  vacaciones: { label: 'Vacaciones',          color: '#8899ff',        icon: '🏖' },
+};
+
+function guardarNovedad() {
+  const fecha = document.getElementById('nov-fecha').value;
+  const tipo  = document.getElementById('nov-tipo').value;
+  const horas = +document.getElementById('nov-horas').value || 0;
+  const nota  = document.getElementById('nov-nota').value.trim();
+
+  if(!fecha || horas <= 0) { alert('Completá fecha y horas.'); return; }
+
+  const novedades = LS.get('sar_novedades') || [];
+  novedades.push({ id: Date.now(), fecha, tipo, horas, nota });
+  novedades.sort((a,b) => a.fecha.localeCompare(b.fecha));
+  LS.set('sar_novedades', novedades);
+
+  // Limpiar form
+  document.getElementById('nov-horas').value = '';
+  document.getElementById('nov-nota').value  = '';
+
+  renderNovedades();
+}
+
+function eliminarNovedad(id) {
+  if(!confirm('¿Eliminar esta novedad?')) return;
+  const novedades = (LS.get('sar_novedades') || []).filter(n => n.id !== id);
+  LS.set('sar_novedades', novedades);
+  renderNovedades();
+}
+
+function renderNovedades() {
+  const novedades = LS.get('sar_novedades') || [];
+  const el = document.getElementById('nov-list');
+  if(!novedades.length) {
+    el.innerHTML = '<div class="empty">No hay novedades registradas aún.</div>';
+    return;
+  }
+
+  // Agrupar por mes
+  const porMes = {};
+  novedades.forEach(n => {
+    const mes = n.fecha.slice(0,7); // YYYY-MM
+    if(!porMes[mes]) porMes[mes] = [];
+    porMes[mes].push(n);
+  });
+
+  let html = '';
+  Object.keys(porMes).sort().reverse().forEach(mes => {
+    const items = porMes[mes];
+    // Totales por tipo del mes
+    const totales = {};
+    items.forEach(n => { totales[n.tipo] = (totales[n.tipo]||0) + n.horas; });
+    const resumen = Object.entries(totales).map(([t,h]) =>
+      `<span style="color:${NOV_TIPOS[t].color};font-size:.72rem;margin-right:10px">${NOV_TIPOS[t].icon} ${NOV_TIPOS[t].label}: <strong>${h}h</strong></span>`
+    ).join('');
+
+    const [y,m] = mes.split('-').map(Number);
+    html += `
+    <div style="margin-bottom:16px;">
+      <div style="font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--text);padding:8px 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px;">
+        ${MESES[m-1]} ${y}
+        <div style="margin-top:4px;font-weight:400">${resumen}</div>
+      </div>
+      ${items.map(n => {
+        const info = NOV_TIPOS[n.tipo];
+        const fecha = new Date(n.fecha+'T00:00:00');
+        const diaStr = `${DIAS[fecha.getDay()]} ${fecha.getDate()}`;
+        const unidad = n.tipo === 'vacaciones' ? (n.horas === 1 ? 'día' : 'días') : 'h';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid rgba(42,47,66,.4);font-size:.82rem;">
+          <span style="font-family:var(--mono);color:var(--muted);min-width:72px">${diaStr}</span>
+          <span style="color:${info.color};min-width:20px">${info.icon}</span>
+          <span style="flex:1;color:var(--text)">${info.label}${n.nota ? ` <span style="color:var(--muted);font-size:.75rem">— ${n.nota}</span>` : ''}</span>
+          <span style="font-family:var(--mono);color:${info.color};font-weight:600;min-width:32px;text-align:right">${n.horas}${unidad}</span>
+          <button class="btn btn-danger btn-sm" onclick="eliminarNovedad(${n.id})">✕</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  });
+
+  el.innerHTML = html;
+}
+
+
 let histChart = null;
 
 function guardarHistorial() {
@@ -1416,7 +1540,7 @@ function renderChart(hist) {
 
 // ═══════════════════════════════════ EXPORT / IMPORT
 function exportarDatos() {
-  const keys = ['sar_hist', 'sar_horario6x2'];
+  const keys = ['sar_hist', 'sar_horario6x2', 'sar_novedades'];
   const data = {};
   keys.forEach(k => { const v = LS.get(k); if(v != null) data[k] = v; });
   data._exportado = new Date().toISOString();
@@ -1437,7 +1561,7 @@ function importarDatos(event) {
   reader.onload = e => {
     try {
       const data = JSON.parse(e.target.result);
-      const keys = ['sar_hist', 'sar_horario6x2'];
+      const keys = ['sar_hist', 'sar_horario6x2', 'sar_novedades'];
       let imported = 0;
       keys.forEach(k => {
         if(data[k] != null) { LS.set(k, data[k]); imported++; }
