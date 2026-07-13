@@ -183,7 +183,14 @@
   <h1>SUELDO AR</h1>
   <span>gestor de liquidación y turnos</span>
   <button id="btn-lock-config" onclick="abrirConfigPin()" style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:.7rem;padding:6px 10px;cursor:pointer;">🔒 PIN</button>
+  <label style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:.7rem;padding:6px 10px;cursor:pointer;" title="Restaurar datos">
+    📂 Restaurar
+    <input type="file" accept=".json" style="display:none" onchange="importarDatos(event)">
+  </label>
+  <button onclick="exportarDatos()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:.7rem;padding:6px 10px;cursor:pointer;" title="Exportar backup">💾 Backup</button>
 </header>
+
+<div id="import-msg" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 18px;font-size:.78rem;z-index:9999;white-space:nowrap;"></div>
 
 <nav>
   <button class="active" onclick="showTab('calc')">⟩ Calculadora</button>
@@ -603,19 +610,6 @@
   <div class="card">
     <div class="card-title">Registros mensuales</div>
     <div id="hist-list" style="max-height:420px;overflow-y:auto;"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Exportar / Importar datos</div>
-    <p style="font-size:.8rem;color:var(--muted);margin-bottom:14px;">Exporta toda la configuración e historial como JSON. Importá para restaurar o migrar a otro dispositivo.</p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <button class="btn btn-secondary" onclick="exportarDatos()">⬇ Exportar JSON</button>
-      <label class="btn btn-secondary" style="cursor:pointer;">
-        ⬆ Importar JSON
-        <input type="file" accept=".json" style="display:none" onchange="importarDatos(event)">
-      </label>
-    </div>
-    <div id="import-msg" style="margin-top:10px;font-size:.78rem;"></div>
   </div>
 </div>
 
@@ -1554,6 +1548,14 @@ function exportarDatos() {
   URL.revokeObjectURL(url);
 }
 
+function mostrarMsg(texto, ok=true) {
+  const msg = document.getElementById('import-msg');
+  msg.textContent = texto;
+  msg.style.color  = ok ? 'var(--accent)' : 'var(--red)';
+  msg.style.display = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 3500);
+}
+
 function importarDatos(event) {
   const file = event.target.files[0];
   if(!file) return;
@@ -1566,20 +1568,16 @@ function importarDatos(event) {
       keys.forEach(k => {
         if(data[k] != null) { LS.set(k, data[k]); imported++; }
       });
-      const msg = document.getElementById('import-msg');
-      msg.textContent = `✓ Importado correctamente (${imported} secciones). Recargá la app para ver los cambios.`;
-      msg.style.color = 'var(--accent)';
-      // Refrescar vistas
+      mostrarMsg(`✓ Importado (${imported} secciones). Recargá para ver los cambios.`);
       renderHistorial();
       renderHorarios();
+      renderNovedades();
     } catch {
-      const msg = document.getElementById('import-msg');
-      msg.textContent = '✕ Archivo inválido. Asegurate de importar un JSON exportado por esta app.';
-      msg.style.color = 'var(--red)';
+      mostrarMsg('✕ Archivo inválido.', false);
     }
   };
   reader.readAsText(file);
-  event.target.value = ''; // reset input
+  event.target.value = '';
 }
 </script>
 
